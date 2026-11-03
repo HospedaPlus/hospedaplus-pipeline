@@ -50,3 +50,8 @@ spark_jobs/            jobs de Spark (session.py arma la SparkSession con s3a)
 Dockerfile             apache/airflow:3.1.5 + Java 17 + pyspark + jars hadoop-aws
 docker-compose.yaml    master + 3 workers + RabbitMQ + Flower
 ```
+
+## Despliegue en AWS (2 EC2)
+
+`docker-compose.nucleo.yaml` (EC2 núcleo: Airflow + RabbitMQ) y `docker-compose.workers.yaml`
+(EC2 workers: 3 workers Celery + Spark). Guía paso a paso en [docs/despliegue_aws.md](docs/despliegue_aws.md).
