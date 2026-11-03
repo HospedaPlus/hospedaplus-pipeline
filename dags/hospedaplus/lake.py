@@ -37,6 +37,10 @@ def asset(layer: str, name: str) -> Asset:
 
 
 # Bronze
+BRONZE_F1_HISTORICAL = asset("bronze", "f1_historical")
+BRONZE_F4_AGENCIES = asset("bronze", "f4_agencias")
+BRONZE_F5_REVIEWS = asset("bronze", "f5_reviews")
+BRONZE_F6_EVENTS = asset("bronze", "f6_events")
 BRONZE_F2_LEDGER = asset("bronze", "f2_ledger")
 BRONZE_F3_RESERVATIONS = asset("bronze", "f3_reservations")
 BRONZE_F6_HOLIDAYS = asset("bronze", "f6_holidays")

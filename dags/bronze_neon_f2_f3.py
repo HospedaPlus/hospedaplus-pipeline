@@ -7,13 +7,11 @@ the same file. Read with the etl_reader role.
 
 from __future__ import annotations
 
-import json
-
 import pendulum
-import psycopg2
 from airflow.sdk import dag, task
 
-from hospedaplus.lake import BRONZE_F2_LEDGER, BRONZE_F3_RESERVATIONS, neon_url, put
+from hospedaplus.lake import BRONZE_F2_LEDGER, BRONZE_F3_RESERVATIONS, put
+from hospedaplus.neon import dump
 
 F2_SQL = """
 SELECT * FROM streaming.reservation_event_ledger
@@ -30,12 +28,7 @@ SELECT * FROM operation.reservation_anomalies WHERE created_at >= %s AND created
 
 
 def _dump(sql: str, start, end) -> tuple[bytes, int]:
-    with psycopg2.connect(neon_url()) as conn, conn.cursor() as cur:
-        cur.execute(sql, (start, end))
-        cols = [c.name for c in cur.description]
-        rows = cur.fetchall()
-    lines = [json.dumps(dict(zip(cols, r)), default=str, ensure_ascii=False) for r in rows]
-    return ("\n".join(lines) + ("\n" if lines else "")).encode(), len(rows)
+    return dump(sql, (start, end))
 
 
 def _key(prefix: str, start) -> str:
