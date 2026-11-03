@@ -1,0 +1,67 @@
+# EC2 workers (t3.xlarge): the 3 Celery workers (queues bronze, silver, gold),
+# each running Spark in local mode. They connect to the EC2 núcleo through
+# NUCLEO_HOST (its private IP) for the metadata DB, RabbitMQ and the execution API.
+#
+#   docker compose -f docker-compose.workers.yaml up -d
+---
+x-airflow-common:
+  &airflow-common
+  build: .
+  image: hospedaplus-pipeline:local
+  env_file:
+    - ${ENV_FILE_PATH:-.env}
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD:-airflow}@${NUCLEO_HOST}:5432/airflow
+    AIRFLOW__CELERY__BROKER_URL: amqp://${RABBITMQ_USER:-hospedaplus}:${RABBITMQ_PASSWORD:-hospedaplus}@${NUCLEO_HOST}:5672//
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD:-airflow}@${NUCLEO_HOST}:5432/airflow
+    AIRFLOW__OPERATORS__DEFAULT_QUEUE: bronze
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-change-me-hospedaplus}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://${NUCLEO_HOST}:8080/execution/'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    PYTHONPATH: /opt/airflow
+    # Task logs go to S3, so the UI on the núcleo can read logs of tasks run on the workers EC2.
+    AIRFLOW__LOGGING__REMOTE_LOGGING: ${REMOTE_LOGGING:-true}
+    AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: s3://${S3_BUCKET}/airflow-logs
+    AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID: aws_default
+    AIRFLOW_CONN_AWS_DEFAULT: 'aws://?region_name=${AWS_DEFAULT_REGION:-us-east-2}'
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/spark_jobs:/opt/airflow/spark_jobs
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"
+
+x-worker:
+  &worker
+  <<: *airflow-common
+  healthcheck:
+    test: ["CMD-SHELL", 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"']
+    interval: 30s
+    timeout: 20s
+    retries: 5
+    start_period: 60s
+  restart: always
+
+services:
+  worker-bronze:
+    <<: *worker
+    command: celery worker --queues bronze --concurrency 4
+    hostname: worker-bronze
+
+  worker-silver:
+    <<: *worker
+    command: celery worker --queues silver --concurrency 2
+    hostname: worker-silver
+
+  worker-gold:
+    <<: *worker
+    command: celery worker --queues gold --concurrency 2
+    hostname: worker-gold
