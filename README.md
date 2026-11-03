@@ -59,3 +59,5 @@ docker-compose.yaml    master + 3 workers + RabbitMQ + Flower
 
 `docker-compose.nucleo.yaml` (EC2 núcleo: Airflow + RabbitMQ) y `docker-compose.workers.yaml`
 (EC2 workers: 3 workers Celery + Spark). Guía paso a paso en [docs/despliegue_aws.md](docs/despliegue_aws.md).
+
+CI/CD (lint, validación de DAGs, pruebas Spark, calidad de datos, imagen versionada en GHCR y despliegue opcional): [docs/ci_cd.md](docs/ci_cd.md).

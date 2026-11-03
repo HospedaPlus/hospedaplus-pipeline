@@ -1,0 +1,124 @@
+# CI/CD II — Data Engineering
+#   PR to main  : lint + DAG validation + Spark job tests + data quality tests + image build
+#   push to main: the same, then publish the versioned image to GHCR and deploy to the EC2s
+#   tag vX.Y.Z  : the same, the image is also tagged with the version
+# Deploy stays OFF until the secrets DEPLOY_SSH_KEY, NUCLEO_HOST and WORKERS_HOST exist.
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check dags spark_jobs tests
+      - name: Compose files are valid
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yaml config -q
+          docker compose -f docker-compose.nucleo.yaml config -q
+          docker compose -f docker-compose.workers.yaml config -q
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          activate-environment: true
+      - name: Install Airflow + requirements (same pins as the image)
+        run: scripts/ci-install.sh pytest==8.4.2
+      - name: DAG validation, Spark jobs and data quality tests
+        run: python -m pytest -v -p no:logging
+
+  image:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and publish outside PRs)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      NUCLEO_HOST: ${{ secrets.NUCLEO_HOST }}
+      WORKERS_HOST: ${{ secrets.WORKERS_HOST }}
+      SSH_USER: ${{ secrets.DEPLOY_SSH_USER || 'ubuntu' }}
+    steps:
+      - name: Deploy is off until the secrets exist
+        id: gate
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$NUCLEO_HOST" ] || [ -z "$WORKERS_HOST" ]; then
+            echo "::notice::Deploy skipped: add DEPLOY_SSH_KEY, NUCLEO_HOST and WORKERS_HOST to turn it on."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.enabled == 'true'
+        name: SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+      - if: steps.gate.outputs.enabled == 'true'
+        name: Núcleo (Airflow + RabbitMQ), then workers
+        run: |
+          run() { ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$SSH_USER@$1" "$2"; }
+          run "$NUCLEO_HOST" 'cd ~/hospedaplus-pipeline && git pull --ff-only && docker compose -f docker-compose.nucleo.yaml up -d --build'
+          run "$WORKERS_HOST" 'cd ~/hospedaplus-pipeline && git pull --ff-only && docker compose -f docker-compose.workers.yaml up -d --build && docker compose -f docker-compose.workers.yaml restart'
