@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/ruff-action@v3
         with:
+          version: "0.14.3"
           args: check dags spark_jobs tests
       - name: Compose files are valid
         run: |
