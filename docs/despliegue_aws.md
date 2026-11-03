@@ -53,6 +53,7 @@ sudo usermod -aG docker ubuntu && newgrp docker
 git clone https://github.com/HospedaPlus/hospedaplus-pipeline.git
 cd hospedaplus-pipeline
 cp .env.example .env && nano .env
+sudo chown -R "$(id -u)":0 logs config dags plugins spark_jobs   # Airflow escribe aquí
 ```
 
 El `.env` es **el mismo en las dos**, con: `NEON_READ_URL` (etl_reader de production),
