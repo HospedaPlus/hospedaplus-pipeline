@@ -36,11 +36,15 @@ Los DAGs arrancan pausados: actívalos en la UI.
 | DAG | Horario | Cola | Destino |
 |---|---|---|---|
 | `bronze_f7_fx` | diario 01:00 UTC | bronze | `bronze/f7_fx/fecha=YYYY-MM-DD.json` (Frankfurter v2, base USD) |
-| `bronze_f6_holidays` | día 1 de cada mes | bronze | `bronze/f6_holidays/anio=YYYY/pais=XX.json` (Nager.Date) |
+| `bronze_f6_holidays` | día 1 de cada mes | bronze | `bronze/f6_holidays/anio=YYYY/pais=XX.json` (Nager API v4) |
+| `bronze_f6_events` | diario 02:30 UTC | bronze | `bronze/f6_events/fecha=YYYY-MM-DD.jsonl` (Neon `operation.local_events`) |
+| `bronze_f1_historical` | manual, una vez | bronze | `bronze/f1_historical/hotel_bookings.csv` (Kaggle, desde hospedaplus-csv) |
+| `bronze_f4_agencias` | lunes 07:00 UTC | bronze | verifica `bronze/f4_agencias/semana=YYYY-Www/` (lo sube `f4-weekly` con `F4_S3_BUCKET`) |
+| `bronze_f5_reviews` | cada hora (incremental) | bronze | `bronze/f5_reviews/fecha=…/hora=HH.jsonl` (API de reseñas, `updated_from`) |
 | `bronze_neon_f2_f3` | cada hora (incremental) | bronze | `bronze/f2_ledger/…`, `bronze/f3_reservations/…`, `bronze/f3_anomalies/…` (JSON Lines) |
 | `silver_fx_daily` | cuando cambia `bronze/f7_fx` | silver | `silver/tasa_cambio_diaria/` (parquet, todos los días con relleno hacia adelante) |
 
-Pendientes: bronze de F1, F4, F5 y eventos F6b; silver de reservas, reseñas y festivos; gold.
+Pendientes: silver de reservas, reseñas, calendario y F1; gold.
 
 ## Estructura
 
