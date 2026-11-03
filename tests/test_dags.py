@@ -36,3 +36,25 @@ def test_no_catchup_storm(dagbag):
     """A new DAG must not launch hundreds of past runs when it is deployed."""
     for dag_id, dag in dagbag.dags.items():
         assert not dag.catchup, dag_id
+
+
+def test_compose_enables_cron_data_intervals():
+    """Incremental DAGs read [data_interval_start, data_interval_end). Airflow 3 makes that
+    window empty for cron schedules unless create_cron_data_intervals is on."""
+    root = DAGS.parent
+    for f in ("docker-compose.yaml", "docker-compose.nucleo.yaml", "docker-compose.workers.yaml"):
+        assert 'AIRFLOW__SCHEDULER__CREATE_CRON_DATA_INTERVALS: "True"' in (root / f).read_text(), f
+
+
+def test_hourly_window_is_one_hour(monkeypatch):
+    """With the compose setting, the 05:00 run of an hourly DAG reads 04:00-05:00."""
+    import pendulum
+    from airflow.timetables.base import TimeRestriction
+
+    monkeypatch.setenv("AIRFLOW__SCHEDULER__CREATE_CRON_DATA_INTERVALS", "True")
+    dag = DagBag(dag_folder=str(DAGS), include_examples=False).dags["bronze_neon_f2_f3"]
+    info = dag.timetable.next_dagrun_info(
+        last_automated_data_interval=None,
+        restriction=TimeRestriction(pendulum.datetime(2026, 11, 3, 4, tz="UTC"), None, False),
+    )
+    assert info.data_interval.end - info.data_interval.start == pendulum.duration(hours=1)
