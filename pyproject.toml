@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hospedaplus", "spark_jobs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
