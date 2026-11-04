@@ -16,7 +16,9 @@ from hospedaplus.lake import BRONZE_F3_FULL, BRONZE_NEON_DIMS, SILVER_CANCELACIO
 
 @dag(schedule=(SILVER_FX_DAILY & BRONZE_F3_FULL & BRONZE_NEON_DIMS),
      start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False,
-     tags=["silver", "F2", "F3", "F4"])
+     tags=["silver", "F2", "F3", "F4"],
+     default_args={"retries": 2, "retry_delay": pendulum.duration(minutes=10),
+                   "execution_timeout": pendulum.duration(minutes=45)})
 def silver_reservas_daily():
     @task(queue="silver", outlets=[SILVER_RESERVAS, SILVER_CANCELACIONES])
     def build() -> dict:

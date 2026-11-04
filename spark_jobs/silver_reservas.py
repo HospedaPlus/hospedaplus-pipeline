@@ -26,8 +26,23 @@ from __future__ import annotations
 
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
+from pyspark.sql import types as T
 
 from spark_jobs import quality
+
+# Bronze columns, all read as text (dump() writes NUMERIC/dates as strings).
+# An explicit schema skips Spark's inference pass, which reads every file twice.
+RES_COLS = ["id", "code", "source", "external_code", "hotel_id", "room_type_id", "channel_id", "guest_id",
+            "check_in", "check_out", "rooms_count", "adults", "children", "infants", "status", "is_refundable",
+            "currency", "first_night_amount", "total_amount", "penalty_amount", "duplicate_of",
+            "created_at", "cancelled_at", "last_event_at", "updated_at"]
+ANOM_COLS = ["id", "code", "hotel_id", "room_type_id", "channel_id", "guest_id", "check_in", "check_out",
+             "adults", "children", "infants", "currency", "total_amount", "defect_type", "created_at"]
+
+
+def _schema(cols: list[str]) -> T.StructType:
+    return T.StructType([T.StructField(c, T.StringType()) for c in cols])
+
 
 LEAD_BUCKETS = [(1, "0-1 dias"), (3, "1-3 dias"), (7, "3-7 dias"), (30, "7-30 dias"), (90, "30-90 dias")]
 
@@ -153,17 +168,14 @@ def check(reservas: DataFrame, cancel: DataFrame) -> None:
 
 # ---- IO -----------------------------------------------------------------------------------------
 
-def _read_json(s: SparkSession, paths: list[str]) -> DataFrame | None:
-    found = []
-    for p in paths:
-        try:
-            s.read.text(p).limit(1).collect()
-            found.append(p)
-        except Exception:  # path not there yet (e.g. full load never ran)
-            pass
-    if not found:
+def _read_days(s: SparkSession, prefix: str, days: list[str], cols: list[str]) -> DataFrame | None:
+    """Read only the fecha=... folders listed, with a fixed schema (no inference, no full listing)."""
+    from spark_jobs.session import path
+    if not days:
         return None
-    return s.read.option("primitivesAsString", "true").json(found)
+    base = path("bronze", f"{prefix}/")
+    return (s.read.schema(_schema(cols)).option("basePath", base)
+            .json([f"{base}fecha={d}/" for d in days]))
 
 
 def latest_snapshot(df: DataFrame) -> DataFrame:
@@ -196,36 +208,33 @@ def _union(a: DataFrame | None, b: DataFrame | None) -> DataFrame:
     return out
 
 
-def _newest_snapshot(df: DataFrame | None) -> tuple[DataFrame | None, object]:
-    """Only the newest fecha=... folder of a full snapshot."""
-    if df is None:
-        return None, None
-    newest = df.agg(F.max("fecha")).first()[0]
-    return df.filter(F.col("fecha") == newest), newest
-
-
-def _since(df: DataFrame | None, day) -> DataFrame | None:
-    """Hourly files from the day before the snapshot on (overlap is fine: dedup keeps the newest)."""
-    if df is None or day is None:
-        return df
-    return df.filter(F.col("fecha") >= F.date_sub(F.lit(day).cast("date"), 1))
+def plan_days(full_days: list[str], hourly_days: list[str]) -> tuple[list[str], list[str]]:
+    """Newest full snapshot + hourly days from the day before it on (dedup keeps the newest version)."""
+    import datetime as dt
+    if not full_days:
+        return [], hourly_days
+    newest = full_days[-1]
+    since = (dt.date.fromisoformat(newest) - dt.timedelta(days=1)).isoformat()
+    return [newest], [d for d in hourly_days if d >= since]
 
 
 def run() -> dict[str, int]:
-    from spark_jobs.session import path, spark
+    from spark_jobs.session import partitions, path, spark
     s = spark("silver_reservas")
-    full, day = _newest_snapshot(_read_json(s, [path("bronze", "f3_reservations_full/")]))
-    hourly = _since(_read_json(s, [path("bronze", "f3_reservations/")]), day)
-    raw = _union(_with_src(full, 0), _with_src(hourly, 1))
-    full_anom, aday = _newest_snapshot(_read_json(s, [path("bronze", "f3_anomalies_full/")]))
-    anomalies = _union(full_anom, _since(_read_json(s, [path("bronze", "f3_anomalies/")]), aday))
+    full_d, hour_d = plan_days(partitions("bronze", "f3_reservations_full"), partitions("bronze", "f3_reservations"))
+    raw = _union(_with_src(_read_days(s, "f3_reservations_full", full_d, RES_COLS), 0),
+                 _with_src(_read_days(s, "f3_reservations", hour_d, RES_COLS), 1))
+    afull_d, ahour_d = plan_days(partitions("bronze", "f3_anomalies_full"), partitions("bronze", "f3_anomalies"))
+    anomalies = _union(_read_days(s, "f3_anomalies_full", afull_d, ANOM_COLS),
+                       _read_days(s, "f3_anomalies", ahour_d, ANOM_COLS))
     fx = s.read.parquet(path("silver", "tasa_cambio_diaria"))
     reservas = transform(raw, _latest_dim(s, "hotels"), _latest_dim(s, "channels"),
                          _latest_dim(s, "room_types"), fx).cache()
     cancel = cancelaciones(reservas).cache()
+    rej = rechazadas(anomalies).cache()
     check(reservas, cancel)
+    counts = {"reservas": reservas.count(), "cancelaciones": cancel.count(), "rechazadas": rej.count()}
     reservas.write.mode("overwrite").partitionBy("source").parquet(path("silver", "reservas"))
     cancel.write.mode("overwrite").parquet(path("silver", "cancelaciones"))
-    rej = rechazadas(anomalies)
     rej.write.mode("overwrite").parquet(path("silver", "reservas_rechazadas"))
-    return {"reservas": reservas.count(), "cancelaciones": cancel.count(), "rechazadas": rej.count()}
+    return counts
