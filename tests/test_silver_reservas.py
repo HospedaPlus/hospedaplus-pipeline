@@ -69,3 +69,12 @@ def test_check_rejects_duplicate_codes(spark):
     out = sr.transform(raw, *dims(spark))
     with pytest.raises(quality.QualityError):
         sr.check(out.unionByName(out), sr.cancelaciones(out))
+
+
+def test_latest_snapshot_keeps_newest_file(spark, tmp_path):
+    d = tmp_path / "hotels"
+    d.mkdir()
+    (d / "fecha=2026-11-03.jsonl").write_text('{"id": "1", "code": "OLD"}\n')
+    (d / "fecha=2026-11-04.jsonl").write_text('{"id": "1", "code": "NEW"}\n')
+    out = sr.latest_snapshot(spark.read.option("primitivesAsString", "true").json(str(d))).collect()
+    assert [r.code for r in out] == ["NEW"]
