@@ -221,10 +221,12 @@ def plan_days(full_days: list[str], hourly_days: list[str]) -> tuple[list[str], 
 def run() -> dict[str, int]:
     from spark_jobs.session import partitions, path, spark
     s = spark("silver_reservas")
-    full_d, hour_d = plan_days(partitions("bronze", "f3_reservations_full"), partitions("bronze", "f3_reservations"))
+    full_d, hour_d = plan_days(partitions("bronze", "f3_reservations_full", complete=True),
+                               partitions("bronze", "f3_reservations"))
     raw = _union(_with_src(_read_days(s, "f3_reservations_full", full_d, RES_COLS), 0),
                  _with_src(_read_days(s, "f3_reservations", hour_d, RES_COLS), 1))
-    afull_d, ahour_d = plan_days(partitions("bronze", "f3_anomalies_full"), partitions("bronze", "f3_anomalies"))
+    afull_d, ahour_d = plan_days(partitions("bronze", "f3_anomalies_full", complete=True),
+                                 partitions("bronze", "f3_anomalies"))
     anomalies = _union(_read_days(s, "f3_anomalies_full", afull_d, ANOM_COLS),
                        _read_days(s, "f3_anomalies", ahour_d, ANOM_COLS))
     fx = s.read.parquet(path("silver", "tasa_cambio_diaria"))

@@ -10,7 +10,7 @@ from hospedaplus.lake import BRONZE_F1_HISTORICAL, SILVER_HISTORICO_F1
 
 
 @dag(schedule=[BRONZE_F1_HISTORICAL],
-     start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False, tags=["silver", "F1", "P1"],
+     start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False, max_active_runs=1, tags=["silver", "F1", "P1"],
      default_args={"retries": 2, "retry_delay": pendulum.duration(minutes=10),
                    "execution_timeout": pendulum.duration(minutes=45)})
 def silver_f1_historico():
