@@ -7,6 +7,10 @@ newest snapshot plus the hourly files from the day before on. It reads by id in
 pages so Neon and the worker never hold the whole table at once:
 bronze/f3_reservations_full/fecha=YYYY-MM-DD/part-NNNNN.jsonl
 bronze/f3_anomalies_full/fecha=YYYY-MM-DD/part-NNNNN.jsonl
+Also the operational state silver needs for occupancy (P2/P3):
+bronze/f3_inventory_full/      rooms total/sold/overbooking limit per hotel, room type and night
+bronze/f3_relocations_full/    relocated bookings (with their hotel and room type)
+bronze/f3_rejections_full/     bookings refused for lack of rooms
 Silver merges this with the hourly files and keeps the newest version of each code.
 """
 
@@ -21,6 +25,12 @@ from hospedaplus.lake import BRONZE_F3_FULL, put
 from hospedaplus.neon import dump
 
 PAGE = 50_000
+
+
+RELOCATIONS_SQL = """
+SELECT l.*, r.code, r.hotel_id, r.room_type_id
+  FROM operation.relocations l JOIN operation.reservations r ON r.id = l.reservation_id
+"""
 
 
 def _copy(table: str, prefix: str, day: str) -> int:
@@ -41,8 +51,13 @@ def bronze_neon_full_load():
     @task(queue="bronze", outlets=[BRONZE_F3_FULL])
     def copy_all() -> dict[str, int]:
         day = pendulum.now("UTC").to_date_string()
+        body, relocations = dump(RELOCATIONS_SQL)  # small table, no id column
+        put(f"bronze/f3_relocations_full/fecha={day}/part-00000.jsonl", body, "application/x-ndjson")
         return {"reservations": _copy("reservations", "f3_reservations_full", day),
-                "anomalies": _copy("reservation_anomalies", "f3_anomalies_full", day)}
+                "anomalies": _copy("reservation_anomalies", "f3_anomalies_full", day),
+                "inventory": _copy("inventory", "f3_inventory_full", day),
+                "rejections": _copy("reservation_rejections", "f3_rejections_full", day),
+                "relocations": relocations}
 
     copy_all()
 
