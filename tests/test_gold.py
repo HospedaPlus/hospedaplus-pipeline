@@ -82,8 +82,15 @@ def test_on_the_books_counts_bookings_alive_14_days_before(spark):
 
 
 def test_suggested_price_rules(spark):
-    rates = strings(spark, [{"hotel_id": "1", "room_type_id": "1", "season_code": "HIGH", "currency": "COP",
-                             "amount": "125000", "valid_from": "2026-11-05", "valid_to": "2026-11-07"}])
+    rates = strings(spark, [
+        {"id": "1", "hotel_id": "1", "room_type_id": "1", "season_code": "HIGH", "currency": "COP",
+         "amount": "125000", "valid_from": "2026-11-05", "valid_to": "2026-11-07"},
+        # a past period: must not add (backwards) nights
+        {"id": "2", "hotel_id": "1", "room_type_id": "1", "season_code": "LOW", "currency": "COP",
+         "amount": "85000", "valid_from": "2026-09-01", "valid_to": "2026-10-31"},
+        # an older period overlapping the 7th: the newest valid_from wins
+        {"id": "3", "hotel_id": "1", "room_type_id": "1", "season_code": "MID", "currency": "COP",
+         "amount": "100000", "valid_from": "2026-11-01", "valid_to": "2026-11-07"}])
     hotels = strings(spark, [{"id": "1", "code": "HP-CO-001"}])
     rooms = strings(spark, [{"id": "1", "code": "DOUBLE"}])
     otb = spark.createDataFrame([("HP-CO-001", "DOUBLE", dt.date(2026, 11, 5), 13, 10),   # +30 % -> x1.10
@@ -94,7 +101,10 @@ def test_suggested_price_rules(spark):
     cal = spark.createDataFrame([("HP-CO-001", dt.date(2026, 11, 7), True, False)],
                                 "hotel_code string, fecha date, es_festivo boolean, hay_evento boolean")
     fx = spark.createDataFrame([(dt.date(2026, 11, 4), "COP", 1.0)], "fecha date, moneda string, cop_por_unidad double")
-    p = {r.fecha.day: r for r in g.mart_p3_precio_sugerido(rates, hotels, rooms, otb, cal, fx, TODAY).collect()}
+    rows = g.mart_p3_precio_sugerido(rates, hotels, rooms, otb, cal, fx, TODAY).collect()
+    p = {r.fecha.day: r for r in rows}
+    assert len(rows) == len(p) == 4  # 4 (today) to 7 November, once each
+    assert p[4].temporada == "MID" and p[7].temporada == "HIGH"  # newest valid_from wins on the 7th
     assert p[5].tarifa_base == 100_000.0                     # 125.000 / HIGH 1,25
     assert p[5].precio_sugerido == pytest.approx(137_500.0)  # 125.000 x 1,10
     assert p[6].precio_sugerido == pytest.approx(115_000.0)  # 125.000 x 0,92
