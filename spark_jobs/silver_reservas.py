@@ -127,6 +127,14 @@ def check(reservas: DataFrame, cancel: DataFrame) -> None:
     name = "silver.reservas"
     quality.not_empty(reservas, name)
     quality.unique(reservas, name, ["code"])
+    sin_cop = (reservas.filter("total_cop IS NULL")
+               .groupBy("source", "currency", F.col("total").isNull().alias("sin_total"),
+                        F.col("tasa_cop").isNull().alias("sin_tasa"))
+               .count().collect())
+    if sin_cop:
+        detalle = "; ".join(f"{r.source}/{r.currency} sin_total={r.sin_total} sin_tasa={r.sin_tasa}: {r['count']}"
+                            for r in sin_cop)
+        raise quality.QualityError(f"{name}: rows without total_cop -> {detalle}")
     quality.no_nulls(reservas, name, ["code", "source", "hotel_code", "channel_type", "check_in", "check_out",
                                       "status", "total_cop"])
     bad = reservas.filter("check_out <= check_in OR adultos < 1 OR total_cop < 0").count()
