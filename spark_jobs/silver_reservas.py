@@ -158,11 +158,20 @@ def _read_json(s: SparkSession, paths: list[str]) -> DataFrame | None:
     return s.read.option("primitivesAsString", "true").json(found)
 
 
+def latest_snapshot(df: DataFrame) -> DataFrame:
+    """Keep only the newest daily snapshot of a catalog, one row per id.
+
+    Files are named <table>/fecha=YYYY-MM-DD.jsonl (a file, not a folder), so Spark
+    does not add a 'fecha' column: take it from the file name.
+    """
+    df = df.withColumn("_fecha", F.regexp_extract(F.input_file_name(), r"fecha=(\d{4}-\d{2}-\d{2})", 1))
+    newest = df.agg(F.max("_fecha")).first()[0]
+    return df.filter(F.col("_fecha") == newest).drop("_fecha").dropDuplicates(["id"])
+
+
 def _latest_dim(s: SparkSession, table: str) -> DataFrame:
     from spark_jobs.session import path
-    df = s.read.option("primitivesAsString", "true").json(path("bronze", f"neon_dims/{table}/"))
-    newest = df.select(F.max("fecha")).first()[0] if "fecha" in df.columns else None
-    return df.filter(F.col("fecha") == newest) if newest else df
+    return latest_snapshot(s.read.option("primitivesAsString", "true").json(path("bronze", f"neon_dims/{table}/")))
 
 
 def _with_src(df: DataFrame | None, src: int) -> DataFrame | None:
