@@ -13,7 +13,9 @@ from hospedaplus.lake import BRONZE_F7_FX, SILVER_FX_DAILY
 
 
 @dag(schedule=[BRONZE_F7_FX], start_date=pendulum.datetime(2026, 10, 1, tz="UTC"), catchup=False,
-     tags=["silver", "F7"])
+     tags=["silver", "F7"],
+     default_args={"retries": 2, "retry_delay": pendulum.duration(minutes=10),
+                   "execution_timeout": pendulum.duration(minutes=45)})
 def silver_fx_daily():
     @task(queue="silver", outlets=[SILVER_FX_DAILY])
     def build() -> int:

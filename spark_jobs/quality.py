@@ -20,10 +20,11 @@ def not_empty(df: DataFrame, name: str) -> None:
 
 
 def no_nulls(df: DataFrame, name: str, cols: list[str]) -> None:
+    # One pass over the data for every column, not one count per column.
+    row = df.agg(*[F.sum(F.col(c).isNull().cast("int")).alias(c) for c in cols]).first()
     for c in cols:
-        n = df.filter(F.col(c).isNull()).count()
-        if n:
-            raise QualityError(f"{name}: {n} nulls in {c}")
+        if row[c]:
+            raise QualityError(f"{name}: {row[c]} nulls in {c}")
 
 
 def unique(df: DataFrame, name: str, keys: list[str]) -> None:

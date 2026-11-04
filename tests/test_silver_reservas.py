@@ -89,3 +89,20 @@ def test_updated_at_wins_over_event_dates(spark):
     ])
     out = sr.latest_version(raw).collect()
     assert [r.status for r in out] == ["no_show"]
+
+
+def test_plan_days_reads_newest_snapshot_and_recent_hours():
+    full, hourly = sr.plan_days(["2026-11-03", "2026-11-04"], ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"])
+    assert full == ["2026-11-04"]
+    assert hourly == ["2026-11-03", "2026-11-04"]
+    assert sr.plan_days([], ["2026-11-01"]) == ([], ["2026-11-01"])
+
+
+def test_read_days_fixed_schema(spark, tmp_path, monkeypatch):
+    monkeypatch.setattr("spark_jobs.session.path", lambda layer, name: f"{tmp_path}/{layer}/{name}")
+    d = tmp_path / "bronze" / "f3_reservations" / "fecha=2026-11-04"
+    d.mkdir(parents=True)
+    (d / "hora=10.jsonl").write_text(json.dumps(res("A")) + "\n")
+    (d / "hora=11.jsonl").write_text("")  # empty hour is fine
+    df = sr._read_days(spark, "f3_reservations", ["2026-11-04"], sr.RES_COLS)
+    assert df.count() == 1 and set(sr.RES_COLS) <= set(df.columns)
