@@ -17,10 +17,20 @@ F2_SQL = """
 SELECT * FROM streaming.reservation_event_ledger
  WHERE received_at >= %s AND received_at < %s
 """
+# Incremental by updated_at (set by a trigger on every change in Neon), so late OTA
+# events and status changes without their own date (no_show, relocated) are not missed.
 F3_SQL = """
+SELECT * FROM operation.reservations WHERE updated_at >= %s AND updated_at < %s
+"""
+# Before db_simulated adds updated_at: the newest of the dates the row carries.
+F3_SQL_LEGACY = """
 SELECT * FROM operation.reservations
  WHERE greatest(created_at, coalesce(cancelled_at, created_at), coalesce(last_event_at, created_at)) >= %s
    AND greatest(created_at, coalesce(cancelled_at, created_at), coalesce(last_event_at, created_at)) < %s
+"""
+HAS_UPDATED_AT = """
+SELECT 1 FROM information_schema.columns
+ WHERE table_schema = 'operation' AND table_name = 'reservations' AND column_name = 'updated_at'
 """
 F3_ANOMALIES_SQL = """
 SELECT * FROM operation.reservation_anomalies WHERE created_at >= %s AND created_at < %s
@@ -46,7 +56,8 @@ def bronze_neon_f2_f3():
 
     @task(queue="bronze", outlets=[BRONZE_F3_RESERVATIONS])
     def f3_reservations(data_interval_start=None, data_interval_end=None) -> int:
-        body, n = _dump(F3_SQL, data_interval_start, data_interval_end)
+        sql = F3_SQL if dump(HAS_UPDATED_AT)[1] else F3_SQL_LEGACY
+        body, n = _dump(sql, data_interval_start, data_interval_end)
         put(_key("f3_reservations", data_interval_start), body, "application/x-ndjson")
         body, m = _dump(F3_ANOMALIES_SQL, data_interval_start, data_interval_end)
         put(_key("f3_anomalies", data_interval_start), body, "application/x-ndjson")

@@ -16,19 +16,20 @@ def spark():
 
 
 def res(code, status="confirmed", created="2026-11-01T10:00:00", cancelled=None, last=None, src=1, cur="USD",
-        source="F3", total="100.00", penalty="0"):
+        source="F3", total="100.00", penalty="0", updated=None):
     return {"code": code, "source": source, "external_code": None, "hotel_id": "1", "channel_id": "1",
             "room_type_id": "1", "status": status, "check_in": "2026-11-10", "check_out": "2026-11-12",
             "rooms_count": "1", "adults": "2", "children": "1", "infants": "0", "is_refundable": "true",
             "currency": cur, "first_night_amount": "50", "total_amount": total, "penalty_amount": penalty,
-            "created_at": created, "cancelled_at": cancelled, "last_event_at": last, "_src": src}
+            "created_at": created, "cancelled_at": cancelled, "last_event_at": last, "updated_at": updated,
+            "_src": src}
 
 
 def frame(spark, rows):
     # same as bronze: JSON lines read with every primitive as string
     rdd = spark.sparkContext.parallelize([json.dumps(r) for r in rows])
     df = spark.read.option("primitivesAsString", "true").json(rdd)
-    for c in ("cancelled_at", "last_event_at", "external_code"):
+    for c in ("cancelled_at", "last_event_at", "external_code", "updated_at"):
         if c not in df.columns:
             df = df.withColumn(c, F.lit(None).cast("string"))
     return df.withColumn("_src", F.col("_src").cast("int"))
@@ -78,3 +79,13 @@ def test_latest_snapshot_keeps_newest_file(spark, tmp_path):
     (d / "fecha=2026-11-04.jsonl").write_text('{"id": "1", "code": "NEW"}\n')
     out = sr.latest_snapshot(spark.read.option("primitivesAsString", "true").json(str(d))).collect()
     assert [r.code for r in out] == ["NEW"]
+
+
+def test_updated_at_wins_over_event_dates(spark):
+    # no_show changes no date of its own: only updated_at says the full snapshot is newer
+    raw = frame(spark, [
+        res("A", src=1, updated="2026-11-02T10:00:00"),
+        res("A", status="no_show", src=0, updated="2026-11-04T03:00:00"),
+    ])
+    out = sr.latest_version(raw).collect()
+    assert [r.status for r in out] == ["no_show"]

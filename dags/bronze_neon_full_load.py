@@ -1,8 +1,9 @@
-"""One-off full copy of operation.reservations and reservation_anomalies -> S3 bronze.
+"""Nightly full snapshot of operation.reservations and reservation_anomalies -> S3 bronze.
 
-bronze_neon_f2_f3 only brings what changes each hour, so the bookings that
-existed before the pipeline started (the seed history) never reach the lake.
-Run this once by hand (and again only to rebuild the lake). It reads by id in
+bronze_neon_f2_f3 only brings what changes each hour. This snapshot (03:00 UTC)
+brings the seed history from before the pipeline and squares silver with Neon
+every night, whatever the hourly copy might have missed. Silver reads only the
+newest snapshot plus the hourly files from the day before on. It reads by id in
 pages so Neon and the worker never hold the whole table at once:
 bronze/f3_reservations_full/fecha=YYYY-MM-DD/part-NNNNN.jsonl
 bronze/f3_anomalies_full/fecha=YYYY-MM-DD/part-NNNNN.jsonl
@@ -16,7 +17,7 @@ import json
 import pendulum
 from airflow.sdk import dag, task
 
-from hospedaplus.lake import BRONZE_F3_ANOMALIES, BRONZE_F3_RESERVATIONS, put
+from hospedaplus.lake import BRONZE_F3_FULL, put
 from hospedaplus.neon import dump
 
 PAGE = 50_000
@@ -34,10 +35,10 @@ def _copy(table: str, prefix: str, day: str) -> int:
     return total
 
 
-@dag(schedule=None, start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False,
+@dag(schedule="0 3 * * *", start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False,
      tags=["bronze", "F2", "F3", "F4"], default_args={"retries": 2})
 def bronze_neon_full_load():
-    @task(queue="bronze", outlets=[BRONZE_F3_RESERVATIONS, BRONZE_F3_ANOMALIES])
+    @task(queue="bronze", outlets=[BRONZE_F3_FULL])
     def copy_all() -> dict[str, int]:
         day = pendulum.now("UTC").to_date_string()
         return {"reservations": _copy("reservations", "f3_reservations_full", day),
