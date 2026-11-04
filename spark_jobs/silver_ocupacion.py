@@ -65,7 +65,7 @@ def check(df: DataFrame) -> None:
 
 def _snapshot(s, prefix: str, cols: list[str]):
     from spark_jobs.session import partitions
-    days = partitions("bronze", prefix)
+    days = partitions("bronze", prefix, complete=True)
     return sr._read_days(s, prefix, days[-1:], cols)
 
 

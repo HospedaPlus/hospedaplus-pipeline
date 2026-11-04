@@ -11,7 +11,7 @@ from hospedaplus.lake import SILVER_RESENAS
 
 
 @dag(schedule="30 3 * * *",
-     start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False, tags=["silver", "F5", "P5"],
+     start_date=pendulum.datetime(2026, 11, 1, tz="UTC"), catchup=False, max_active_runs=1, tags=["silver", "F5", "P5"],
      default_args={"retries": 2, "retry_delay": pendulum.duration(minutes=10),
                    "execution_timeout": pendulum.duration(minutes=45)})
 def silver_resenas_daily():
