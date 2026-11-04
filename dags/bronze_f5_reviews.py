@@ -24,7 +24,7 @@ PAGE_SIZE = 100
      tags=["bronze", "F5"], default_args={"retries": 3, "retry_exponential_backoff": True})
 def bronze_f5_reviews():
     @task(queue="bronze", outlets=[BRONZE_F5_REVIEWS])
-    def extract(data_interval_start=None) -> int:
+    def extract(data_interval_start=None, data_interval_end=None) -> int:
         base = os.getenv("F5_API_URL", "").rstrip("/")
         if not base:
             raise RuntimeError("F5_API_URL is empty: set the reviews API URL in .env")
@@ -39,6 +39,8 @@ def bronze_f5_reviews():
             if page >= body.get("total_pages", 1):
                 break
             page += 1
+        # The API only filters "from"; keep [start, end) so consecutive hours do not overlap.
+        items = [i for i in items if i.get("updated_at") and pendulum.parse(i["updated_at"]) < data_interval_end]
         lines = "\n".join(json.dumps(i, ensure_ascii=False) for i in items)
         put(f"bronze/f5_reviews/fecha={data_interval_start:%Y-%m-%d}/hora={data_interval_start:%H}.jsonl",
             (lines + ("\n" if lines else "")).encode(), "application/x-ndjson")
