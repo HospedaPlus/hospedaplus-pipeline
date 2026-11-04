@@ -3,8 +3,9 @@
 Every booking, whatever the channel (F2 OTA, F3 web/corporate, F4 agencies),
 goes through operation.reservar(), so operation.reservations is the single
 source for bookings. Bronze has it twice:
-  f3_reservations_full/  one-off copy of the whole table (seed history)
-  f3_reservations/       hourly files with what changed in each hour
+  f3_reservations_full/  nightly copy of the whole table (only the newest is read)
+  f3_reservations/       hourly files with what changed in each hour (read from
+                         the day before the newest snapshot on)
 The same code shows up several times (created, then cancelled, ...). Silver
 keeps the newest version of each code.
 
@@ -36,9 +37,16 @@ def _ts(c: str):
 
 
 def latest_version(raw: DataFrame) -> DataFrame:
-    """One row per code: the newest state (greatest of created/cancelled/last event)."""
-    version = F.greatest(_ts("created_at"), F.coalesce(_ts("cancelled_at"), _ts("created_at")),
-                         F.coalesce(_ts("last_event_at"), _ts("created_at")))
+    """One row per code: the newest state.
+
+    updated_at (Neon trigger, every change) when the row has it; older files
+    without it fall back to the greatest of created/cancelled/last event.
+    """
+    legacy = F.greatest(_ts("created_at"), F.coalesce(_ts("cancelled_at"), _ts("created_at")),
+                        F.coalesce(_ts("last_event_at"), _ts("created_at")))
+    if "updated_at" not in raw.columns:
+        raw = raw.withColumn("updated_at", F.lit(None).cast("string"))
+    version = F.coalesce(_ts("updated_at"), legacy)
     w = Window.partitionBy("code").orderBy(F.col("_version").desc(), F.col("_src").desc())
     return (raw.withColumn("_version", version)
             .withColumn("_rn", F.row_number().over(w))
@@ -188,13 +196,29 @@ def _union(a: DataFrame | None, b: DataFrame | None) -> DataFrame:
     return out
 
 
+def _newest_snapshot(df: DataFrame | None) -> tuple[DataFrame | None, object]:
+    """Only the newest fecha=... folder of a full snapshot."""
+    if df is None:
+        return None, None
+    newest = df.agg(F.max("fecha")).first()[0]
+    return df.filter(F.col("fecha") == newest), newest
+
+
+def _since(df: DataFrame | None, day) -> DataFrame | None:
+    """Hourly files from the day before the snapshot on (overlap is fine: dedup keeps the newest)."""
+    if df is None or day is None:
+        return df
+    return df.filter(F.col("fecha") >= F.date_sub(F.lit(day).cast("date"), 1))
+
+
 def run() -> dict[str, int]:
     from spark_jobs.session import path, spark
     s = spark("silver_reservas")
-    raw = _union(_with_src(_read_json(s, [path("bronze", "f3_reservations_full/")]), 0),
-                 _with_src(_read_json(s, [path("bronze", "f3_reservations/")]), 1))
-    anomalies = _union(_read_json(s, [path("bronze", "f3_anomalies_full/")]),
-                       _read_json(s, [path("bronze", "f3_anomalies/")]))
+    full, day = _newest_snapshot(_read_json(s, [path("bronze", "f3_reservations_full/")]))
+    hourly = _since(_read_json(s, [path("bronze", "f3_reservations/")]), day)
+    raw = _union(_with_src(full, 0), _with_src(hourly, 1))
+    full_anom, aday = _newest_snapshot(_read_json(s, [path("bronze", "f3_anomalies_full/")]))
+    anomalies = _union(full_anom, _since(_read_json(s, [path("bronze", "f3_anomalies/")]), aday))
     fx = s.read.parquet(path("silver", "tasa_cambio_diaria"))
     reservas = transform(raw, _latest_dim(s, "hotels"), _latest_dim(s, "channels"),
                          _latest_dim(s, "room_types"), fx).cache()
