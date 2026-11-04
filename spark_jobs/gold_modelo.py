@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from spark_jobs import quality
@@ -218,10 +218,15 @@ def mart_p3_precio_sugerido(rates: DataFrame, hotels: DataFrame, room_types: Dat
     h = hotels.select(F.col("id").alias("hotel_id"), F.col("code").alias("hotel_code"))
     t = room_types.select(F.col("id").alias("room_type_id"), F.col("code").alias("room_type"))
     season = F.create_map(*[x for k, v in SEASON_MULT.items() for x in (F.lit(k), F.lit(v))])
-    r = (rates.select("hotel_id", "room_type_id", F.col("season_code").alias("temporada"), "currency",
-                      F.col("amount").cast("double").alias("tarifa"),
-                      F.explode(F.sequence(F.greatest(F.to_date("valid_from"), F.lit(today)),
-                                           F.least(F.to_date("valid_to"), F.lit(end)))).alias("fecha"))
+    # Only rate periods that touch the horizon: for any other one the sequence below would run
+    # backwards (start > end) and repeat nights. If periods overlap, the newest valid_from wins.
+    live = rates.filter((F.to_date("valid_to") >= F.lit(today)) & (F.to_date("valid_from") <= F.lit(end)))
+    newest = Window.partitionBy("hotel_id", "room_type_id", "fecha").orderBy(F.col("_desde").desc(), F.col("id").desc())
+    r = (live.select("id", "hotel_id", "room_type_id", F.col("season_code").alias("temporada"), "currency",
+                     F.col("amount").cast("double").alias("tarifa"), F.to_date("valid_from").alias("_desde"),
+                     F.explode(F.sequence(F.greatest(F.to_date("valid_from"), F.lit(today)),
+                                          F.least(F.to_date("valid_to"), F.lit(end)))).alias("fecha"))
+         .withColumn("_rn", F.row_number().over(newest)).filter("_rn = 1").drop("_rn", "_desde", "id")
          .join(F.broadcast(h), "hotel_id").join(F.broadcast(t), "room_type_id").drop("hotel_id", "room_type_id")
          .withColumn("tarifa_base", F.round(F.col("tarifa") / season[F.col("temporada")], 2)))
     cal = calendario.select("hotel_code", "fecha", "es_festivo", "hay_evento")
