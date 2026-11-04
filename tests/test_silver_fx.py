@@ -56,3 +56,15 @@ def test_quality_rejects_bad_data(spark):
         quality.no_gaps(gap, "t", "fecha", "moneda")
     with pytest.raises(quality.QualityError):
         quality.not_empty(df.limit(0), "t")
+
+
+def test_quotes_with_different_dates(spark, tmp_path):
+    # EUR published on Friday only, COP on Friday and Monday: EUR must still exist Monday
+    data = rows("2026-10-30", 4000.0, 0.8) + [{"date": "2026-11-02", "base": "USD", "quote": "COP", "rate": 4100.0}]
+    f = tmp_path / "fx.json"
+    f.write_text(json.dumps(data))
+    out = silver_fx.transform(spark.read.option("multiLine", "true").json(str(f)))
+    silver_fx.check(out)
+    got = {(r.fecha, r.moneda): r.cop_por_unidad for r in out.collect()}
+    assert got[(dt.date(2026, 11, 2), "EUR")] == 4100.0 / 0.8
+    assert got[(dt.date(2026, 11, 2), "USD")] == 4100.0

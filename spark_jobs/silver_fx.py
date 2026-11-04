@@ -16,22 +16,24 @@ from spark_jobs.session import path, spark
 
 
 def transform(raw: DataFrame) -> DataFrame:
-    rates = raw.select(F.to_date("date").alias("fecha_tasa"), F.col("quote").alias("moneda"),
-                       F.col("rate").cast("double").alias("rate")).dropDuplicates(["fecha_tasa", "moneda"])
-    cop = rates.filter("moneda = 'COP'").select("fecha_tasa", F.col("rate").alias("usd_cop"))
-    per_ccy = (rates.join(cop, "fecha_tasa")
-               .select("fecha_tasa", "moneda", (F.col("usd_cop") / F.col("rate")).alias("cop_por_unidad")))
-    usd = cop.select("fecha_tasa", F.lit("USD").alias("moneda"), F.col("usd_cop").alias("cop_por_unidad"))
-    per_ccy = per_ccy.unionByName(usd)
-
-    bounds = per_ccy.agg(F.min("fecha_tasa").alias("a"), F.max("fecha_tasa").alias("b"))
+    # v2 mixes providers: each quote can carry its own publication date (EUR/MXN
+    # are not always dated like COP). So first fill every currency's USD rate on a
+    # daily grid, and only then divide by the COP rate of the same day.
+    rates = (raw.select(F.to_date("date").alias("fecha"), F.col("quote").alias("moneda"),
+                        F.col("rate").cast("double").alias("rate"))
+             .dropna().dropDuplicates(["fecha", "moneda"])
+             .unionByName(raw.select(F.to_date("date").alias("fecha")).dropna().distinct()
+                          .select("fecha", F.lit("USD").alias("moneda"), F.lit(1.0).alias("rate"))))
+    bounds = rates.agg(F.min("fecha").alias("a"), F.max("fecha").alias("b"))
     days = bounds.select(F.explode(F.sequence("a", "b")).alias("fecha"))
-    grid = days.crossJoin(per_ccy.select("moneda").distinct())
+    grid = days.crossJoin(rates.select("moneda").distinct())
     w = Window.partitionBy("moneda").orderBy("fecha").rowsBetween(Window.unboundedPreceding, 0)
-    filled = (grid.join(per_ccy.withColumnRenamed("fecha_tasa", "fecha"), ["fecha", "moneda"], "left")
-              .withColumn("cop_por_unidad", F.last("cop_por_unidad", ignorenulls=True).over(w))
-              .dropna(subset=["cop_por_unidad"]))
-    return filled
+    filled = (grid.join(rates, ["fecha", "moneda"], "left")
+              .withColumn("rate", F.last("rate", ignorenulls=True).over(w))
+              .dropna(subset=["rate"]))
+    cop = filled.filter("moneda = 'COP'").select("fecha", F.col("rate").alias("usd_cop"))
+    return (filled.join(cop, "fecha")
+            .select("fecha", "moneda", (F.col("usd_cop") / F.col("rate")).alias("cop_por_unidad")))
 
 
 def check(df: DataFrame) -> None:
