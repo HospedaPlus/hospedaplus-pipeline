@@ -56,3 +56,6 @@ SILVER_CALENDARIO = asset("silver", "calendario_hotel")
 SILVER_OCUPACION = asset("silver", "ocupacion_diaria")
 SILVER_RESENAS = asset("silver", "resenas")
 SILVER_HISTORICO_F1 = asset("silver", "historico_f1")
+# Gold
+GOLD_MODELO = asset("gold", "modelo")  # every dim_*, fact_* and mart_* table, rebuilt together
+GOLD_NEON_CANCEL_RATES = asset("gold", "neon_cancellation_rate_by_lead")

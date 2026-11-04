@@ -1,7 +1,7 @@
 """Neon reference tables -> S3 bronze, daily full snapshot.
 
 Silver needs them to turn ids into catalog codes (hotel, channel, room type),
-the channel commission (P4) and the cancellation policy (P1). They are small,
+the channel commission (P4), the cancellation policy (P1) and the nightly rates (gold price, P3). They are small,
 so each run writes the whole table:
 bronze/neon_dims/<table>/fecha=YYYY-MM-DD.jsonl
 Guests are left out on purpose (PII stays in Neon).
@@ -20,6 +20,9 @@ TABLES = {
     "room_types": "SELECT id, code, name, max_guests FROM operation.room_types",
     "channels": "SELECT id, code, name, channel_type, commission_pct, source FROM operation.channels",
     "cancellation_policies": "SELECT * FROM operation.cancellation_policies",
+    # Nightly rate per hotel, room type and season period: base of the suggested price (gold, RN-05/06).
+    "rates": ("SELECT id, hotel_id, room_type_id, season_code, valid_from, valid_to, currency, amount"
+              " FROM operation.rates"),
 }
 
 
