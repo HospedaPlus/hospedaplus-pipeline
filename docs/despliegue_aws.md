@@ -72,9 +72,9 @@ docker compose -f docker-compose.workers.yaml up -d --build
 ```
 
 Comprueba:
-- Airflow `https://airflow.coderhivex.com`
-- Flower `https://flower.coderhivex.com` → deben salir `celery@worker-bronze`, `-silver`, `-gold`.
-- RabbitMQ `https://rabbitmq.coderhivex.com`
+- Airflow `https://airflow-buenavista.coderhivex.com`
+- Flower `https://flower-buenavista.coderhivex.com` → deben salir `celery@worker-bronze`, `-silver`, `-gold`.
+- RabbitMQ `https://rabbitmq-buenavista.coderhivex.com`
 
 Las tres pasan por Nginx en el núcleo (`deploy/nginx/hospedaplus.conf`). Flower (5555) y RabbitMQ (15672)
 solo escuchan en `127.0.0.1`; sin Nginx se entra con un túnel SSH (`ssh -L 5555:localhost:5555 ...`).
