@@ -27,7 +27,7 @@ llega a S3 (`bronze/`, `silver/`, `gold/`), y los logs de las tareas a `airflow-
 
 | SG | Entrada |
 |---|---|
-| `sg-nucleo` | 22, 8080, 5555, 15672 desde **tu IP** · 5432, 5672, 8080 desde **`sg-workers`** |
+| `sg-nucleo` | 80, 443 desde **0.0.0.0/0** (Nginx) · 22 · 5432, 5672, 8080 desde **`sg-workers`** |
 | `sg-workers` | 22 desde **tu IP** |
 
 ## 3. Lanzar las dos EC2
@@ -72,8 +72,12 @@ docker compose -f docker-compose.workers.yaml up -d --build
 ```
 
 Comprueba:
-- Airflow `http://<IP pública núcleo>:8080`
-- Flower `http://<IP pública núcleo>:5555` → deben salir `celery@worker-bronze`, `-silver`, `-gold`.
+- Airflow `https://airflow-buenavista.coderhivex.com`
+- Flower `https://flower-buenavista.coderhivex.com` → deben salir `celery@worker-bronze`, `-silver`, `-gold`.
+- RabbitMQ `https://rabbitmq-buenavista.coderhivex.com`
+
+Las tres pasan por Nginx en el núcleo (`deploy/nginx/hospedaplus.conf`). Flower (5555) y RabbitMQ (15672)
+solo escuchan en `127.0.0.1`; sin Nginx se entra con un túnel SSH (`ssh -L 5555:localhost:5555 ...`).
 
 ## 7. Actualizar DAGs
 

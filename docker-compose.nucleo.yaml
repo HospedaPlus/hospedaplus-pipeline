@@ -23,6 +23,9 @@ x-airflow-common:
     AIRFLOW__OPERATORS__DEFAULT_QUEUE: bronze
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-change-me-hospedaplus}
+    # Behind Nginx (deploy/nginx): trust X-Forwarded-Proto so the login cookie is marked Secure.
+    # The public URL itself goes in .env as AIRFLOW__API__BASE_URL.
+    AIRFLOW__FAB__ENABLE_PROXY_FIX: 'true'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'   # a new DAG runs on its schedule without unpausing it by hand
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
@@ -73,7 +76,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-hospedaplus}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-hospedaplus}
     ports:
-      - "15672:15672"   # RabbitMQ management UI
+      - "127.0.0.1:15672:15672"   # RabbitMQ management UI, only through Nginx (deploy/nginx)
       - "5672:5672"     # AMQP for the workers EC2 (open only to the workers security group)
     volumes:
       - rabbitmq-volume:/var/lib/rabbitmq
@@ -151,7 +154,7 @@ services:
     <<: *airflow-common
     command: celery flower
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"   # only through Nginx (deploy/nginx)
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
       interval: 30s
