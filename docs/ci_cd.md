@@ -12,7 +12,8 @@ Workflow: `.github/workflows/ci-cd.yml` (GitHub Actions).
 
 `spark_jobs/quality.py` tiene los controles (no vacío, sin nulos, llave única, valores > 0, sin días faltantes).
 Cada job silver los corre **antes de escribir**: si uno falla, la tarea de Airflow falla y el silver anterior queda intacto.
-Hoy los usa `silver_fx` (tasa de cambio); los siguientes jobs silver los usarán igual.
+Los usan todos los jobs silver (`silver_fx`, `silver_reservas`, `silver_ocupacion`, `silver_calendario`,
+`silver_resenas`, `silver_f1`) y `gold_modelo`.
 
 ## Correr las pruebas en local
 
@@ -33,7 +34,7 @@ Cuando existen, entra por SSH al núcleo y luego a workers y hace `git pull` + `
 | Secreto | Valor |
 |---|---|
 | `DEPLOY_SSH_KEY` | Contenido completo del `.pem` con el que entras por Termius (desde `-----BEGIN` hasta `-----END ...-----`) |
-| `NUCLEO_HOST` | IP pública (o DNS público) de la EC2 núcleo |
+| `NUCLEO_HOST` | IP pública de la EC2 núcleo (Elastic IP) |
 | `WORKERS_HOST` | IP pública (o DNS público) de la EC2 workers |
 | `DEPLOY_SSH_USER` | Opcional; por defecto `ubuntu` |
 
