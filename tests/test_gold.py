@@ -162,4 +162,8 @@ def test_build_end_to_end_passes_checks(spark):
     assert fo[20].ingreso_cop == 200_000.0 and fo[21].ingreso_cop == 200_000.0  # 400.000 over 2 nights
     rev = t["mart_p3_revenue"].filter("fecha = '2026-10-20'").first()
     assert rev.adr_cop == 200_000.0 and rev.revpar_cop == 20_000.0 and rev.ocupacion_pct == 10.0
+    # Net of the 15 % channel commission; the cancelled booking adds nothing.
+    assert fo[20].ingreso_neto_cop == 170_000.0
+    assert rev.ingreso_neto_cop == 170_000.0
+    assert rev.adr_neto_cop == 170_000.0 and rev.revpar_neto_cop == 17_000.0
     assert t["dim_hotel"].first().habitaciones == 10
