@@ -92,7 +92,8 @@ def _nights(fact_res: DataFrame) -> DataFrame:
     return fact_res.filter("noches > 0").select(
         "hotel_code", "room_type", "habitaciones", "fecha_reserva", "es_cancelada",
         F.to_date(F.col("_cancelada_en")).alias("fecha_cancelacion"),
-        (F.col("total_cop") / F.col("noches")).alias("ingreso_noche_cop"), night.alias("fecha"))
+        (F.col("total_cop") / F.col("noches")).alias("ingreso_noche_cop"),
+        (F.col("neto_cop") / F.col("noches")).alias("ingreso_neto_noche_cop"), night.alias("fecha"))
 
 
 def nights(reservas: DataFrame) -> DataFrame:
@@ -115,12 +116,13 @@ def on_the_books(n: DataFrame) -> DataFrame:
 
 def fact_ocupacion(ocupacion: DataFrame, n: DataFrame, calendario: DataFrame) -> DataFrame:
     ingreso = (n.filter("NOT es_cancelada").groupBy("hotel_code", "room_type", "fecha")
-               .agg(F.round(F.sum(F.col("ingreso_noche_cop") * 1.0), 2).alias("ingreso_cop")))
+               .agg(F.round(F.sum(F.col("ingreso_noche_cop") * 1.0), 2).alias("ingreso_cop"),
+                    F.round(F.sum(F.col("ingreso_neto_noche_cop") * 1.0), 2).alias("ingreso_neto_cop")))
     cal = calendario.select("hotel_code", "fecha", "es_festivo", "nombre_festivo", "hay_evento", "evento",
                             "categoria_evento")
     return (ocupacion.join(ingreso, ["hotel_code", "room_type", "fecha"], "left")
             .join(cal, ["hotel_code", "fecha"], "left")
-            .fillna({"ingreso_cop": 0.0, "es_festivo": False, "hay_evento": False}))
+            .fillna({"ingreso_cop": 0.0, "ingreso_neto_cop": 0.0, "es_festivo": False, "hay_evento": False}))
 
 
 def fact_resenas(resenas: DataFrame) -> DataFrame:
@@ -182,12 +184,16 @@ def mart_p2_sobreventa(fo: DataFrame) -> DataFrame:
 
 
 def mart_p3_revenue(fo: DataFrame, otb: DataFrame) -> DataFrame:
-    """Q3: occupancy, ADR, RevPAR and pickup per hotel and night, with holiday and event flags."""
+    """Q3: occupancy, ADR, RevPAR and pickup per hotel and night, with holiday and event flags.
+
+    adr_cop / revpar_cop use gross revenue (industry standard); adr_neto_cop / revpar_neto_cop
+    (NetRevPAR) use revenue after the channel commission, i.e. what the hotel actually keeps."""
     p = otb.groupBy("hotel_code", "fecha").agg(F.sum("otb_14d").alias("otb_14d"),
                                                 F.sum("otb_14d_anio_anterior").alias("otb_14d_anio_anterior"))
     return (fo.groupBy("hotel_code", "fecha")
             .agg(F.sum("habitaciones").alias("habitaciones"), F.sum("vendidas").alias("vendidas"),
                  F.round(F.sum("ingreso_cop"), 2).alias("ingreso_cop"),
+                 F.round(F.sum("ingreso_neto_cop"), 2).alias("ingreso_neto_cop"),
                  F.max("es_festivo").alias("es_festivo"), F.max("hay_evento").alias("hay_evento"),
                  F.first("categoria_evento", ignorenulls=True).alias("categoria_evento"))
             .join(p, ["hotel_code", "fecha"], "left")
@@ -196,6 +202,10 @@ def mart_p3_revenue(fo: DataFrame, otb: DataFrame) -> DataFrame:
             .withColumn("adr_cop", F.round(F.when(F.col("vendidas") > 0, F.col("ingreso_cop") / F.col("vendidas")), 2))
             .withColumn("revpar_cop", F.round(F.when(F.col("habitaciones") > 0,
                                                      F.col("ingreso_cop") / F.col("habitaciones")), 2))
+            .withColumn("adr_neto_cop", F.round(F.when(F.col("vendidas") > 0,
+                                                       F.col("ingreso_neto_cop") / F.col("vendidas")), 2))
+            .withColumn("revpar_neto_cop", F.round(F.when(F.col("habitaciones") > 0,
+                                                          F.col("ingreso_neto_cop") / F.col("habitaciones")), 2))
             .withColumn("pickup_pct", _pickup_pct()))
 
 
